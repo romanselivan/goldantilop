@@ -21,7 +21,10 @@ class SheetManager:
 
     def _get_client(self):
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_file(G_SHEET_CRED, scopes=scope)
+        if isinstance(G_SHEET_CRED, Credentials):
+            creds = G_SHEET_CRED
+        else:
+            creds = Credentials.from_service_account_info(json.loads(G_SHEET_CRED), scopes=scope)
         return gspread.authorize(creds)
 
     def _init_sheets(self):

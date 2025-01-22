@@ -1,8 +1,10 @@
 # config.py
 import os
+import base64
+import json
 from datetime import timedelta
 from dotenv import load_dotenv
-from enum import Enum
+from google.oauth2.service_account import Credentials
 
 load_dotenv()
 
@@ -11,8 +13,18 @@ ADMIN_ID_1 = int(os.getenv('ADMIN_ID_1'))
 ADMIN_ID_2 = int(os.getenv('ADMIN_ID_2'))
 ADMIN_IDS = [os.getenv('ADMIN_ID_1'), os.getenv('ADMIN_ID_2')]
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-G_SHEET_CRED = os.getenv('G_SHEET_CRED')
 G_SHEET_ID = os.getenv('G_SHEET_ID')
+
+# Получаем JSON-строку из переменной окружения
+g_sheet_cred_json = os.getenv('G_SHEET_CRED_JSON')
+
+if g_sheet_cred_json:
+    # Преобразуем JSON-строку в словарь
+    g_sheet_cred_info = json.loads(g_sheet_cred_json)
+    # Создаем объект учетных данных из словаря
+    G_SHEET_CRED = Credentials.from_service_account_info(g_sheet_cred_info, scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive'])
+else:
+    G_SHEET_CRED = None
 
 # Параметры кэширования
 CACHE_TTL = timedelta(minutes=10)
