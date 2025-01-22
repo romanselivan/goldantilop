@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -36,6 +38,14 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize SheetManager: {e}")
     sys.exit(1)
+
+async def handle(request):
+    return web.Response(text="Bot is running")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    return app
 
 @main_router.message(Command("start"))
 @handle_errors
@@ -146,9 +156,6 @@ async def main():
         logger.info("Bot stopped")
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.critical(f"Fatal error: {e}", exc_info=True)
+    port = int(os.environ.get("PORT", 5000))
+    web.run_app(web_server(), host="0.0.0.0", port=port)
+    asyncio.run(main())
