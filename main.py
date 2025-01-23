@@ -9,6 +9,7 @@ from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramNetworkError
 
@@ -18,9 +19,9 @@ from config import (
 )
 from sheet_manager import SheetManager
 from onboarding import onboarding_router, start_onboarding
-from user import main_menu, user_router
+from user import main_menu, user_router, return_to_main_menu, show_exchange_rates, show_help, show_user_requests
 from admin import admin_router
-from exchange import exchange_router, setup_exchange_router
+from exchange import exchange_router, setup_exchange_router, start_exchange
 from errors import error_router, handle_errors, setup_global_error_handler
 from uiux import UIUX
 
@@ -67,10 +68,10 @@ class BotApp:
             router.bot = self.bot
 
         setup_exchange_router(
-            self.return_to_main_menu, 
-            self.show_exchange_rates, 
-            self.show_help, 
-            self.show_user_requests
+            return_to_main_menu, 
+            show_exchange_rates, 
+            show_help, 
+            show_user_requests
         )
 
         setup_global_error_handler(self.dp)
@@ -83,16 +84,33 @@ class BotApp:
                 await self.dp.start_polling(self.bot)
             except TelegramNetworkError as e:
                 logger.error(f"Network error: {e}")
-                await asyncio.sleep(5)  # Ждем 5 секунд перед повторной попыткой
+                await asyncio.sleep(1)  # Ждем 1 секунду перед повторной попыткой
             except Exception as e:
                 logger.error(f"Unexpected error: {e}")
-                await asyncio.sleep(10)  # Ждем 10 секунд перед повторной попыткой
+                await asyncio.sleep(3)  # Ждем 3 секунды перед повторной попыткой
 
     def setup_routes(self):
         @self.main_router.message(Command("start"))
         @handle_errors
         async def cmd_start(message: types.Message):
             return await self.process_start_command(message)
+
+        @self.main_router.message(lambda message: message.text in [
+            ButtonTexts.HELP, 
+            ButtonTexts.VIEW_RATES, 
+            ButtonTexts.MY_REQUESTS, 
+            ButtonTexts.CALCULATE_EXCHANGE
+        ])
+        async def handle_main_menu_commands(message: types.Message, state: FSMContext):
+            await state.clear()
+            if message.text == ButtonTexts.HELP:
+                await show_help(message, state)
+            elif message.text == ButtonTexts.VIEW_RATES:
+                await show_exchange_rates(message)
+            elif message.text == ButtonTexts.MY_REQUESTS:
+                await show_user_requests(message)
+            elif message.text == ButtonTexts.CALCULATE_EXCHANGE:
+                await start_exchange(message, state)
 
     async def process_start_command(self, message: types.Message):
         user_id = str(message.from_user.id)
@@ -178,21 +196,6 @@ class BotApp:
         else:
             logger.error(f"Unknown user status for user {user_id}: {user_status}")
             await message.answer(Messages.UNKNOWN_STATUS, reply_markup=types.ReplyKeyboardRemove())
-
-    async def return_to_main_menu(self, message: types.Message):
-        await main_menu(message.bot, str(message.from_user.id))
-
-    async def show_exchange_rates(self, message: types.Message):
-        # Implement the logic to show exchange rates
-        pass
-
-    async def show_help(self, message: types.Message):
-        # Implement the logic to show help
-        pass
-
-    async def show_user_requests(self, message: types.Message):
-        # Implement the logic to show user requests
-        pass
 
 async def main():
     bot_app = BotApp()
