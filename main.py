@@ -187,13 +187,12 @@ class BotApp:
             logger.error(f"Unknown user status for user {user_id}: {user_status}")
             await message.answer(Messages.UNKNOWN_STATUS, reply_markup=types.ReplyKeyboardRemove())
 
-async def shutdown(dp: Dispatcher):
+async def shutdown(dp: Dispatcher, bot: Bot):
     logger.info("Shutting down...")
     await dp.storage.close()
     if hasattr(dp.storage, 'wait_closed'):
         await dp.storage.wait_closed()
-    session = await dp.bot.get_session()
-    await session.close()
+    await bot.session.close()
 
 async def main():
     bot_app = BotApp()
@@ -211,10 +210,11 @@ async def main():
     
     try:
         await bot_app.start()
+        await bot_app.dp.start_polling(bot_app.bot)
     except Exception as e:
         logger.error(f"Critical error during bot execution: {e}", exc_info=True)
     finally:
-        await shutdown(bot_app.dp)
+        await shutdown(bot_app.dp, bot_app.bot)
         await runner.cleanup()
         logger.info("Bot stopped")
 
