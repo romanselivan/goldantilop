@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sys
+import signal
 from contextlib import suppress
 
 from aiohttp import web
@@ -92,8 +93,8 @@ class BotApp:
     def setup_routes(self):
         @self.main_router.message(Command("start"))
         @handle_errors
-        async def cmd_start(message: types.Message):
-            return await self.process_start_command(message)
+        async def cmd_start(message: types.Message, state: FSMContext):
+            return await self.process_start_command(message, state)
 
         @self.main_router.message(lambda message: message.text in [
             ButtonTexts.HELP, 
@@ -106,13 +107,13 @@ class BotApp:
             if message.text == ButtonTexts.HELP:
                 await show_help(message, state)
             elif message.text == ButtonTexts.VIEW_RATES:
-                await show_exchange_rates(message)
+                await show_exchange_rates(message, state)
             elif message.text == ButtonTexts.MY_REQUESTS:
                 await show_user_requests(message)
             elif message.text == ButtonTexts.CALCULATE_EXCHANGE:
                 await start_exchange(message, state)
 
-    async def process_start_command(self, message: types.Message):
+    async def process_start_command(self, message: types.Message, state: FSMContext):
         user_id = str(message.from_user.id)
         username = message.from_user.username
 
@@ -151,16 +152,16 @@ class BotApp:
                         }
                         self.sheet_manager.add_new_entry(USERS_SHEET, new_user_data)
                         await message.answer(Messages.USER_WELCOME, reply_markup=types.ReplyKeyboardRemove())
-                        await start_onboarding(message)
+                        await start_onboarding(message, state)
                     else:
                         await message.answer(Messages.SYSTEM_NOT_READY)
             else:
-                await self.handle_user_status(user_id, user_data, message)
+                await self.handle_user_status(user_id, user_data, message, state)
         except Exception as e:
             logger.error(f"Error in cmd_start: {str(e)}", exc_info=True)
             await message.answer(Messages.ERROR)
 
-    async def handle_user_status(self, user_id: str, user_data: dict, message: types.Message):
+    async def handle_user_status(self, user_id: str, user_data: dict, message: types.Message, state: FSMContext):
         user_status = user_data.get(UserFields.USER_STATUS)
         if not user_status:
             logger.warning(f"User {user_id} has no USER_STATUS. Data: {user_data}")
@@ -190,12 +191,19 @@ class BotApp:
         elif user_status == UserStatus.ACTIVE:
             await main_menu(message.bot, user_id)
         elif user_status == UserStatus.PENDING:
-            await start_onboarding(message)
+            await start_onboarding(message, state)
         elif user_status == UserStatus.BAN:
             await message.answer(Messages.USER_BANNED, reply_markup=types.ReplyKeyboardRemove())
         else:
             logger.error(f"Unknown user status for user {user_id}: {user_status}")
             await message.answer(Messages.UNKNOWN_STATUS, reply_markup=types.ReplyKeyboardRemove())
+
+async def shutdown(dp: Dispatcher):
+    logger.info("Shutting down...")
+    await dp.storage.close()
+    await dp.storage.wait_closed()
+    session = await dp.bot.get_session()
+    await session.close()
 
 async def main():
     bot_app = BotApp()
@@ -214,13 +222,23 @@ async def main():
     
     await site.start()
     
+    async def shutdown_bot(signal):
+        logger.info(f'Received {signal.name}. Shutting down...')
+        await shutdown(bot_app.dp)
+        await runner.cleanup()
+        sys.exit(0)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        asyncio.get_event_loop().add_signal_handler(
+            sig, lambda s=sig: asyncio.create_task(shutdown_bot(s))
+        )
+    
     try:
         await bot_app.start()
     except Exception as e:
         logger.error(f"Critical error during bot execution: {e}", exc_info=True)
     finally:
-        with suppress(Exception):
-            await bot_app.bot.session.close()
+        await shutdown(bot_app.dp)
         await runner.cleanup()
         logger.info("Bot stopped")
 
