@@ -2,13 +2,15 @@ import asyncio
 import logging
 import os
 import sys
+import signal
+from contextlib import suppress
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 
 from config import (
@@ -77,7 +79,7 @@ class BotApp:
         self.setup_routes()
         logger.info("Bot started")
 
-        await self.dp.start_polling(self.bot)
+        await self.dp.start_polling(self.bot, allowed_updates=types.AllowedUpdates.all())
 
     def setup_routes(self):
         @self.main_router.message(Command("start"))
@@ -190,11 +192,16 @@ class BotApp:
 async def shutdown(dp: Dispatcher, bot: Bot):
     logger.info("Shutting down...")
     await dp.storage.close()
-    if hasattr(dp.storage, 'wait_closed'):
-        await dp.storage.wait_closed()
     await bot.session.close()
 
+def signal_handler(signal, frame):
+    logger.info('Received SIGTERM. Shutting down...')
+    asyncio.create_task(shutdown(bot_app.dp, bot_app.bot))
+
+signal.signal(signal.SIGTERM, signal_handler)
+
 async def main():
+    global bot_app
     bot_app = BotApp()
     
     app = web.Application()
@@ -210,9 +217,9 @@ async def main():
     
     try:
         await bot_app.start()
-        await bot_app.dp.start_polling(bot_app.bot)
-    except Exception as e:
-        logger.error(f"Critical error during bot execution: {e}", exc_info=True)
+        await asyncio.Future()  # Бесконечное ожидание
+    except asyncio.CancelledError:
+        pass
     finally:
         await shutdown(bot_app.dp, bot_app.bot)
         await runner.cleanup()
