@@ -8,9 +8,9 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramNetworkError
 
 from config import (
     ADMIN_IDS, BOT_TOKEN, G_SHEET_ID, USERS_SHEET, 
@@ -18,9 +18,9 @@ from config import (
 )
 from sheet_manager import SheetManager
 from onboarding import onboarding_router, start_onboarding
-from user import main_menu, user_router, return_to_main_menu, show_exchange_rates, show_help, show_user_requests
+from user import main_menu, user_router
 from admin import admin_router
-from exchange import exchange_router, setup_exchange_router, start_exchange
+from exchange import exchange_router, setup_exchange_router
 from errors import error_router, handle_errors, setup_global_error_handler
 from uiux import UIUX
 
@@ -37,11 +37,6 @@ logger = logging.getLogger(__name__)
 
 async def handle(request):
     return web.Response(text="Bot is running")
-
-async def web_server():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    return app
 
 class BotApp:
     def __init__(self):
@@ -72,10 +67,10 @@ class BotApp:
             router.bot = self.bot
 
         setup_exchange_router(
-            return_to_main_menu, 
-            show_exchange_rates, 
-            show_help, 
-            show_user_requests
+            self.return_to_main_menu, 
+            self.show_exchange_rates, 
+            self.show_help, 
+            self.show_user_requests
         )
 
         setup_global_error_handler(self.dp)
@@ -83,30 +78,23 @@ class BotApp:
         self.setup_routes()
         logger.info("Bot started")
 
+        while True:
+            try:
+                await self.dp.start_polling(self.bot)
+            except TelegramNetworkError as e:
+                logger.error(f"Network error: {e}")
+                await asyncio.sleep(5)  # Ждем 5 секунд перед повторной попыткой
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}")
+                await asyncio.sleep(10)  # Ждем 10 секунд перед повторной попыткой
+
     def setup_routes(self):
         @self.main_router.message(Command("start"))
         @handle_errors
-        async def cmd_start(message: types.Message, state: FSMContext):
-            return await self.process_start_command(message, state)
+        async def cmd_start(message: types.Message):
+            return await self.process_start_command(message)
 
-        @self.main_router.message(lambda message: message.text in [
-            ButtonTexts.HELP, 
-            ButtonTexts.VIEW_RATES, 
-            ButtonTexts.MY_REQUESTS, 
-            ButtonTexts.CALCULATE_EXCHANGE
-        ])
-        async def handle_main_menu_commands(message: types.Message, state: FSMContext):
-            await state.clear()
-            if message.text == ButtonTexts.HELP:
-                await show_help(message, state)
-            elif message.text == ButtonTexts.VIEW_RATES:
-                await show_exchange_rates(message, state)
-            elif message.text == ButtonTexts.MY_REQUESTS:
-                await show_user_requests(message)
-            elif message.text == ButtonTexts.CALCULATE_EXCHANGE:
-                await start_exchange(message, state)
-
-    async def process_start_command(self, message: types.Message, state: FSMContext):
+    async def process_start_command(self, message: types.Message):
         user_id = str(message.from_user.id)
         username = message.from_user.username
 
@@ -145,16 +133,16 @@ class BotApp:
                         }
                         self.sheet_manager.add_new_entry(USERS_SHEET, new_user_data)
                         await message.answer(Messages.USER_WELCOME, reply_markup=types.ReplyKeyboardRemove())
-                        await start_onboarding(message, state)
+                        await start_onboarding(message)
                     else:
                         await message.answer(Messages.SYSTEM_NOT_READY)
             else:
-                await self.handle_user_status(user_id, user_data, message, state)
+                await self.handle_user_status(user_id, user_data, message)
         except Exception as e:
             logger.error(f"Error in cmd_start: {str(e)}", exc_info=True)
             await message.answer(Messages.ERROR)
 
-    async def handle_user_status(self, user_id: str, user_data: dict, message: types.Message, state: FSMContext):
+    async def handle_user_status(self, user_id: str, user_data: dict, message: types.Message):
         user_status = user_data.get(UserFields.USER_STATUS)
         if not user_status:
             logger.warning(f"User {user_id} has no USER_STATUS. Data: {user_data}")
@@ -184,12 +172,27 @@ class BotApp:
         elif user_status == UserStatus.ACTIVE:
             await main_menu(message.bot, user_id)
         elif user_status == UserStatus.PENDING:
-            await start_onboarding(message, state)
+            await start_onboarding(message)
         elif user_status == UserStatus.BAN:
             await message.answer(Messages.USER_BANNED, reply_markup=types.ReplyKeyboardRemove())
         else:
             logger.error(f"Unknown user status for user {user_id}: {user_status}")
             await message.answer(Messages.UNKNOWN_STATUS, reply_markup=types.ReplyKeyboardRemove())
+
+    async def return_to_main_menu(self, message: types.Message):
+        await main_menu(message.bot, str(message.from_user.id))
+
+    async def show_exchange_rates(self, message: types.Message):
+        # Implement the logic to show exchange rates
+        pass
+
+    async def show_help(self, message: types.Message):
+        # Implement the logic to show help
+        pass
+
+    async def show_user_requests(self, message: types.Message):
+        # Implement the logic to show user requests
+        pass
 
 async def main():
     bot_app = BotApp()
@@ -210,7 +213,6 @@ async def main():
     
     try:
         await bot_app.start()
-        await bot_app.dp.start_polling(bot_app.bot)
     except Exception as e:
         logger.error(f"Critical error during bot execution: {e}", exc_info=True)
     finally:
