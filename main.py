@@ -80,15 +80,7 @@ class BotApp:
         self.setup_routes()
         logger.info("Bot started")
 
-        while True:
-            try:
-                await self.dp.start_polling(self.bot)
-            except TelegramNetworkError as e:
-                logger.error(f"Network error: {e}")
-                await asyncio.sleep(1)  # Ждем 1 секунду перед повторной попыткой
-            except Exception as e:
-                logger.error(f"Unexpected error: {e}")
-                await asyncio.sleep(3)  # Ждем 3 секунды перед повторной попыткой
+        await self.dp.start_polling(self.bot)
 
     def setup_routes(self):
         @self.main_router.message(Command("start"))
@@ -208,14 +200,11 @@ async def shutdown(dp: Dispatcher):
 async def main():
     bot_app = BotApp()
     
-    # Настройка веб-сервера
     app = web.Application()
     app.router.add_get("/", handle)
     
-    # Получение порта из окружения
     port = int(os.environ.get("PORT", 5000))
     
-    # Запуск веб-сервера и бота
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host='0.0.0.0', port=port)
