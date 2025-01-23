@@ -2,15 +2,14 @@ import asyncio
 import logging
 import os
 import sys
-import signal
 from contextlib import suppress
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
 
 from config import (
@@ -38,6 +37,11 @@ logger = logging.getLogger(__name__)
 
 async def handle(request):
     return web.Response(text="Bot is running")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    return app
 
 class BotApp:
     def __init__(self):
@@ -78,8 +82,6 @@ class BotApp:
 
         self.setup_routes()
         logger.info("Bot started")
-
-        await self.dp.start_polling(self.bot, allowed_updates=types.AllowedUpdates.all())
 
     def setup_routes(self):
         @self.main_router.message(Command("start"))
@@ -189,26 +191,17 @@ class BotApp:
             logger.error(f"Unknown user status for user {user_id}: {user_status}")
             await message.answer(Messages.UNKNOWN_STATUS, reply_markup=types.ReplyKeyboardRemove())
 
-async def shutdown(dp: Dispatcher, bot: Bot):
-    logger.info("Shutting down...")
-    await dp.storage.close()
-    await bot.session.close()
-
-def signal_handler(signal, frame):
-    logger.info('Received SIGTERM. Shutting down...')
-    asyncio.create_task(shutdown(bot_app.dp, bot_app.bot))
-
-signal.signal(signal.SIGTERM, signal_handler)
-
 async def main():
-    global bot_app
     bot_app = BotApp()
     
+    # Настройка веб-сервера
     app = web.Application()
     app.router.add_get("/", handle)
     
+    # Получение порта из окружения
     port = int(os.environ.get("PORT", 5000))
     
+    # Запуск веб-сервера и бота
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host='0.0.0.0', port=port)
@@ -217,11 +210,12 @@ async def main():
     
     try:
         await bot_app.start()
-        await asyncio.Future()  # Бесконечное ожидание
-    except asyncio.CancelledError:
-        pass
+        await bot_app.dp.start_polling(bot_app.bot)
+    except Exception as e:
+        logger.error(f"Critical error during bot execution: {e}", exc_info=True)
     finally:
-        await shutdown(bot_app.dp, bot_app.bot)
+        with suppress(Exception):
+            await bot_app.bot.session.close()
         await runner.cleanup()
         logger.info("Bot stopped")
 
