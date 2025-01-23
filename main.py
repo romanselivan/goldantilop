@@ -2,17 +2,14 @@ import asyncio
 import logging
 import os
 import sys
-import signal
-from contextlib import suppress
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
-from aiogram.exceptions import TelegramNetworkError
 
 from config import (
     ADMIN_IDS, BOT_TOKEN, G_SHEET_ID, USERS_SHEET, 
@@ -193,7 +190,8 @@ class BotApp:
 async def shutdown(dp: Dispatcher):
     logger.info("Shutting down...")
     await dp.storage.close()
-    await dp.storage.wait_closed()
+    if hasattr(dp.storage, 'wait_closed'):
+        await dp.storage.wait_closed()
     session = await dp.bot.get_session()
     await session.close()
 
@@ -210,17 +208,6 @@ async def main():
     site = web.TCPSite(runner, host='0.0.0.0', port=port)
     
     await site.start()
-    
-    async def shutdown_bot(signal):
-        logger.info(f'Received {signal.name}. Shutting down...')
-        await shutdown(bot_app.dp)
-        await runner.cleanup()
-        sys.exit(0)
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        asyncio.get_event_loop().add_signal_handler(
-            sig, lambda s=sig: asyncio.create_task(shutdown_bot(s))
-        )
     
     try:
         await bot_app.start()
